@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.csv
+*.xlsx
+*.parquet
+*.pkl
+*.joblib
+env/
+.env
+outputs/
+data/
+*.egg-info/
+dist/
+build/
+.ipynb_checkpoints/

@@ -1,0 +1,56 @@
+"""Central configuration for Portfolio-Traditional-OIS project."""
+import os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SRC = ROOT / "src"
+DATA = ROOT / "data"
+OUTPUTS = ROOT / "outputs"
+
+HW1_ROOT = ROOT.parent / "01HW_QT"
+FINAL_PANEL = HW1_ROOT / "Data" / "Output" / "final_panel.parquet"
+
+SPLIT_DATE = "2020-12-31"
+IS_START = "2015-01-01"
+IS_END = "2020-12-31"
+OOS_START = "2021-01-01"
+OOS_END = "2024-12-31"
+
+RET_COL = "excess_ret"
+MKTCAP_COL = "mktcap"
+
+FF4_FACTORS = ["mktrf", "smb", "hml", "mom"]
+BETA_COLS = ["beta_mktrf", "beta_smb", "beta_hml", "beta_mom"]
+
+OPTION_FEATURES = ["SKEW", "AIV", "GLB"]
+TRADITIONAL_FEATURES = ["Mom12m", "IdioVol3F", "BM"]
+ALL_FEATURES = BETA_COLS + OPTION_FEATURES + TRADITIONAL_FEATURES
+
+RESID_SIGNAL_WIN = 60
+RESID_SIGNAL_SKIP = 5
+
+MAX_FACTOR_DEV = 0.1
+MAX_FACTOR_DEV_OPTIM = 0.05  # tighter bound in optimizer to leave headroom for excluded stocks
+MAX_WEIGHT_MULT = 2.0
+MAX_REL_DD_MONTHLY = 0.02
+TE_MAX_MONTHLY = 0.015
+
+WINSOR_LOW = 0.01
+WINSOR_HIGH = 0.99
+UNIVERSE_COVERAGE_THRESHOLD = 0.80
+
+XGB_PARAMS = dict(
+    n_estimators=200,
+    learning_rate=0.05,
+    max_depth=4,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42,
+    n_jobs=-1,
+)
+
+COV_WINDOW_MONTHS = 36
+NW_LAGS = 4
+ANNUALIZE_MONTHLY = 12
+
+RANDOM_SEED = 42
