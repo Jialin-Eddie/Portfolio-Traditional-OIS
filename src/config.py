@@ -51,6 +51,8 @@ XGB_PARAMS = dict(
 )
 XGB_EARLY_STOPPING_ROUNDS = 20
 XGB_VAL_FRACTION = 0.15
+PURGE_MONTHS = 1   # remove val rows whose fwd_ret overlaps predict_month
+EMBARGO_MONTHS = 0  # additional gap between val end and predict_month
 
 COV_WINDOW_MONTHS = 36
 NW_LAGS = 4

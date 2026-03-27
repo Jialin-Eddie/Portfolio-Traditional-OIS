@@ -13,6 +13,8 @@ from src.config import (
     XGB_PARAMS,
     XGB_EARLY_STOPPING_ROUNDS,
     XGB_VAL_FRACTION,
+    PURGE_MONTHS,
+    EMBARGO_MONTHS,
     SPLIT_DATE,
     ALL_FEATURES,
     OUTPUTS,
@@ -59,12 +61,19 @@ def train_is_model(
     val_months = months[-n_val:]
     train_months = months[:-n_val]
 
+    # PURGE: remove last PURGE_MONTHS from val (their fwd_ret leaks into first OOS month)
+    n_drop = PURGE_MONTHS + EMBARGO_MONTHS
+    if n_drop > 0 and len(val_months) > n_drop:
+        val_months = val_months[:-n_drop]
+    purged = n_drop
+
     val_mask = df.index.get_level_values("month_end").isin(val_months)
     X_tr, y_tr = df.loc[~val_mask, features].values, df.loc[~val_mask, "fwd_ret"].values
     X_val, y_val = df.loc[val_mask, features].values, df.loc[val_mask, "fwd_ret"].values
 
     print(f"[IS] Training on {len(X_tr):,} rows, val on {len(X_val):,} rows "
-          f"({len(train_months)} train months, {len(val_months)} val months), "
+          f"({len(train_months)} train months, {len(val_months)} val months, "
+          f"purge={PURGE_MONTHS}, embargo={EMBARGO_MONTHS}), "
           f"{len(features)} features, early_stopping={XGB_EARLY_STOPPING_ROUNDS}")
 
     model = XGBRegressor(**XGB_PARAMS, verbosity=0,
@@ -140,6 +149,14 @@ def walk_forward_oos(
         tr_months = train_df.index.get_level_values("month_end").unique().sort_values()
         n_val = max(1, int(len(tr_months) * XGB_VAL_FRACTION))
         val_mo = tr_months[-n_val:]
+
+        # PURGE: remove last PURGE_MONTHS from val
+        # (their fwd_ret uses price data from predict_month)
+        # EMBARGO: additional gap for serial correlation
+        n_drop = PURGE_MONTHS + EMBARGO_MONTHS
+        if n_drop > 0 and len(val_mo) > n_drop:
+            val_mo = val_mo[:-n_drop]
+
         val_mask_wf = train_df.index.get_level_values("month_end").isin(val_mo)
 
         X_tr_wf = train_df.loc[~val_mask_wf, features].values
@@ -147,9 +164,13 @@ def walk_forward_oos(
         X_val_wf = train_df.loc[val_mask_wf, features].values
         y_val_wf = train_df.loc[val_mask_wf, "fwd_ret"].values
 
-        model = XGBRegressor(**XGB_PARAMS, verbosity=0,
-                              early_stopping_rounds=XGB_EARLY_STOPPING_ROUNDS)
-        model.fit(X_tr_wf, y_tr_wf, eval_set=[(X_val_wf, y_val_wf)], verbose=False)
+        if len(X_val_wf) == 0:
+            model = XGBRegressor(**XGB_PARAMS, verbosity=0)
+            model.fit(X_tr_wf, y_tr_wf, verbose=False)
+        else:
+            model = XGBRegressor(**XGB_PARAMS, verbosity=0,
+                                  early_stopping_rounds=XGB_EARLY_STOPPING_ROUNDS)
+            model.fit(X_tr_wf, y_tr_wf, eval_set=[(X_val_wf, y_val_wf)], verbose=False)
 
         # Prediction targets: all stocks at predict_month with complete features
         pred_mask = monthly.index.get_level_values("month_end") == predict_month
