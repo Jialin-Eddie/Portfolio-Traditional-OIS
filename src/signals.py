@@ -11,6 +11,8 @@ from xgboost import XGBRegressor
 
 from src.config import (
     XGB_PARAMS,
+    XGB_EARLY_STOPPING_ROUNDS,
+    XGB_VAL_FRACTION,
     SPLIT_DATE,
     ALL_FEATURES,
     OUTPUTS,
@@ -50,22 +52,30 @@ def train_is_model(
     """
     df = train_df.copy()
 
-    # Drop rows with NaN fwd_ret (last month per stock has no realized return)
     df = df.dropna(subset=["fwd_ret"] + features)
 
-    X = df[features].values
-    y = df["fwd_ret"].values
+    months = df.index.get_level_values("month_end").unique().sort_values()
+    n_val = max(1, int(len(months) * XGB_VAL_FRACTION))
+    val_months = months[-n_val:]
+    train_months = months[:-n_val]
 
-    print(f"[IS] Training on {len(df):,} rows, {len(features)} features")
+    val_mask = df.index.get_level_values("month_end").isin(val_months)
+    X_tr, y_tr = df.loc[~val_mask, features].values, df.loc[~val_mask, "fwd_ret"].values
+    X_val, y_val = df.loc[val_mask, features].values, df.loc[val_mask, "fwd_ret"].values
 
-    model = XGBRegressor(**XGB_PARAMS, verbosity=0)
-    model.fit(X, y)
+    print(f"[IS] Training on {len(X_tr):,} rows, val on {len(X_val):,} rows "
+          f"({len(train_months)} train months, {len(val_months)} val months), "
+          f"{len(features)} features, early_stopping={XGB_EARLY_STOPPING_ROUNDS}")
 
-    preds = model.predict(X)
-    is_preds = pd.DataFrame(
-        {"y_pred": preds},
-        index=df.index,
-    )
+    model = XGBRegressor(**XGB_PARAMS, verbosity=0,
+                          early_stopping_rounds=XGB_EARLY_STOPPING_ROUNDS)
+    model.fit(X_tr, y_tr, eval_set=[(X_val, y_val)], verbose=False)
+
+    best_iter = model.best_iteration
+    print(f"[IS] Best iteration: {best_iter} / {XGB_PARAMS['n_estimators']}")
+
+    preds = model.predict(df[features].values)
+    is_preds = pd.DataFrame({"y_pred": preds}, index=df.index)
 
     ic_val = _ic(df["fwd_ret"], is_preds["y_pred"])
     print(f"[IS] In-sample IC (Spearman): {ic_val:.4f}")
@@ -127,11 +137,19 @@ def walk_forward_oos(
             f"{train_months.max()} >= prediction month {predict_month}"
         )
 
-        X_train = train_df[features].values
-        y_train = train_df["fwd_ret"].values
+        tr_months = train_df.index.get_level_values("month_end").unique().sort_values()
+        n_val = max(1, int(len(tr_months) * XGB_VAL_FRACTION))
+        val_mo = tr_months[-n_val:]
+        val_mask_wf = train_df.index.get_level_values("month_end").isin(val_mo)
 
-        model = XGBRegressor(**XGB_PARAMS, verbosity=0)
-        model.fit(X_train, y_train)
+        X_tr_wf = train_df.loc[~val_mask_wf, features].values
+        y_tr_wf = train_df.loc[~val_mask_wf, "fwd_ret"].values
+        X_val_wf = train_df.loc[val_mask_wf, features].values
+        y_val_wf = train_df.loc[val_mask_wf, "fwd_ret"].values
+
+        model = XGBRegressor(**XGB_PARAMS, verbosity=0,
+                              early_stopping_rounds=XGB_EARLY_STOPPING_ROUNDS)
+        model.fit(X_tr_wf, y_tr_wf, eval_set=[(X_val_wf, y_val_wf)], verbose=False)
 
         # Prediction targets: all stocks at predict_month with complete features
         pred_mask = monthly.index.get_level_values("month_end") == predict_month

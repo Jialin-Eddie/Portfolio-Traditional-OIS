@@ -40,14 +40,17 @@ WINSOR_HIGH = 0.99
 UNIVERSE_COVERAGE_THRESHOLD = 0.80
 
 XGB_PARAMS = dict(
-    n_estimators=200,
+    n_estimators=500,
     learning_rate=0.05,
     max_depth=4,
     subsample=0.8,
     colsample_bytree=0.8,
+    min_child_weight=50,
     random_state=42,
     n_jobs=-1,
 )
+XGB_EARLY_STOPPING_ROUNDS = 20
+XGB_VAL_FRACTION = 0.15
 
 COV_WINDOW_MONTHS = 36
 NW_LAGS = 4
