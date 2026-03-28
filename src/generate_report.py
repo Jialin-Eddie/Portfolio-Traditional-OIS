@@ -65,7 +65,7 @@ def page_header(fig, title, y=0.97):
     fig.add_artist(line)
 
 
-def page_footer(fig, page_num, total=13):
+def page_footer(fig, page_num, total=15):
     fig.text(0.5, 0.015, f"Page {page_num} of {total}  |  "
              "Portfolio-Traditional-OIS  |  Confidential",
              ha="center", va="bottom", fontsize=7, color="grey",
@@ -348,29 +348,78 @@ with PdfPages(REPORT) as pdf:
                      color=TEXT_DARK, fontfamily="serif",
                      transform=fig.transFigure)
             y -= 0.018
-        y -= 0.010
+        y -= 0.020
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
     print("Page 2 done")
 
-    # ── PAGE 3 — Performance Summary Table ──────────────────────────────────
+    # ── PAGE 3 — Strategy Pipeline ────────────────────────────────────────
     fig = plt.figure(figsize=PORTRAIT)
     fig.patch.set_facecolor(WHITE)
-    page_header(fig, "Performance Summary", y=0.96)
+    page_header(fig, "Strategy Pipeline", y=0.96)
     page_footer(fig, 3)
 
-    def build_perf_rows(mdf, period_label):
+    pipeline_steps = [
+        ("Data Panel", "OpenAssetPricing + WRDS\n1.58M rows, 500 stocks/month\n108 months (2016-2024)", DARK_BLUE),
+        ("Feature Engineering", "11 features: FF4 betas (4)\n+ Option-Implied: SKEW/AIV/GLB (3)\n+ Traditional: Mom/IdioVol/BM (3)\n+ Residual Signal (1)", MED_BLUE),
+        ("Preprocessing", "Winsorize (p1/p99)\n\u2192 Box-Cox (IS-fitted \u03bb)\n\u2192 Cross-sectional Z-score", MED_BLUE),
+        ("XGBoost Signal", "Walk-forward monthly re-estimation\nEarly stopping (patience=20)\nPurge: remove val leakage", DARK_BLUE),
+        ("EMA Smoothing", "\u03bc(t) = 0.3\u00b7raw(t) + 0.7\u00b7\u03bc(t\u22121)\nHalf-life \u2248 2 months\nReduces signal noise & turnover", MED_BLUE),
+        ("cvxpy Optimizer", "max \u03bcTw  s.t. 5 constraints:\n\u2211w=1, w\u22650, w\u22642\u00b7w_bench\n|\u0394\u03b2|\u22640.10, CVaR\u22642%, TE\u22641.5%", DARK_BLUE),
+        ("Portfolio", "Long-only constrained weights\nMonthly rebalancing\n+ Post-hoc drawdown guard", MED_BLUE),
+    ]
+
+    n_steps = len(pipeline_steps)
+    box_w, box_h = 0.70, 0.070
+    x_center = 0.50
+    y_start = 0.88
+    y_gap = 0.095
+
+    for i, (title, desc, color) in enumerate(pipeline_steps):
+        y = y_start - i * y_gap
+        x0 = x_center - box_w / 2
+        rect = FancyBboxPatch((x0, y - box_h / 2), box_w, box_h,
+                               boxstyle="round,pad=0.01",
+                               facecolor=color, edgecolor="none", alpha=0.9,
+                               transform=fig.transFigure)
+        fig.add_artist(rect)
+        fig.text(x0 + 0.015, y + 0.008, title,
+                 ha="left", va="center", fontsize=11, fontweight="bold",
+                 color=WHITE, fontfamily="serif", transform=fig.transFigure)
+        fig.text(x0 + box_w - 0.015, y - 0.002, desc,
+                 ha="right", va="center", fontsize=7.5,
+                 color="#E0E8F0", fontfamily="serif", transform=fig.transFigure,
+                 linespacing=1.3)
+        if i < n_steps - 1:
+            arrow_y_top = y - box_h / 2 - 0.005
+            arrow_y_bot = arrow_y_top - 0.015
+            arrow_line = plt.Line2D([x_center, x_center],
+                                     [arrow_y_top, arrow_y_bot],
+                                     transform=fig.transFigure,
+                                     color=ACCENT, linewidth=2.0,
+                                     marker="v", markersize=8,
+                                     markevery=[1])
+            fig.add_artist(arrow_line)
+
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+    print("Page 3 done")
+
+    # ── PAGE 4 — OOS & Full Performance Comparison ──────────────────────────
+    fig = plt.figure(figsize=PORTRAIT)
+    fig.patch.set_facecolor(WHITE)
+    page_header(fig, "Performance Comparison: QS Portfolio vs Benchmark", y=0.96)
+    page_footer(fig, 4)
+
+    def build_comparison_table(mdf):
         qs_col = "QS Portfolio"
         bn_col = "Benchmark"
-
         def g(row):
             try:
                 return float(mdf.loc[row, qs_col]), float(mdf.loc[row, bn_col])
-
             except Exception:
                 return np.nan, np.nan
-
         def gq(row):
             try:
                 return float(mdf.loc[row, qs_col])
@@ -378,79 +427,53 @@ with PdfPages(REPORT) as pdf:
                 return np.nan
 
         rows = []
-        r, b = g("ann_return");      rows.append([period_label, "QS",   fmt_pct(r), "Ann. Return"])
-        rows.append([period_label,   "BNCH", fmt_pct(b), "Ann. Return"])
-        r, b = g("ann_vol");         rows.append([period_label, "QS",   fmt_pct(r), "Ann. Volatility"])
-        rows.append([period_label,   "BNCH", fmt_pct(b), "Ann. Volatility"])
-        r, b = g("sharpe_nw");       rows.append([period_label, "QS",   fmt_num2(r), "Sharpe (NW)"])
-        rows.append([period_label,   "BNCH", fmt_num2(b), "Sharpe (NW)"])
-        r, b = g("max_drawdown");    rows.append([period_label, "QS",   fmt_pct(r), "Max Drawdown"])
-        rows.append([period_label,   "BNCH", fmt_pct(b), "Max Drawdown"])
-        ir = gq("information_ratio"); rows.append([period_label, "QS",  fmt_num2(ir), "Info Ratio"])
-        rows.append([period_label,   "BNCH", "—", "Info Ratio"])
-        te = gq("tracking_error");   rows.append([period_label, "QS",   fmt_pct(te), "Tracking Error"])
-        rows.append([period_label,   "BNCH", "—", "Tracking Error"])
-        r, b = g("hit_rate");        rows.append([period_label, "QS",   fmt_pct(r), "Hit Rate"])
-        rows.append([period_label,   "BNCH", fmt_pct(b), "Hit Rate"])
-        md = gq("max_relative_dd");  rows.append([period_label, "QS",   fmt_pct(md), "Max Monthly Underperf."])
-        rows.append([period_label,   "BNCH", "—", "Max Monthly Underperf."])
+        r, b = g("ann_return")
+        rows.append(["Ann. Return", fmt_pct(r), fmt_pct(b), fmt_pct(r - b) if not (np.isnan(r) or np.isnan(b)) else "—"])
+        r, b = g("ann_vol")
+        rows.append(["Ann. Volatility", fmt_pct(r), fmt_pct(b), fmt_pct(r - b) if not (np.isnan(r) or np.isnan(b)) else "—"])
+        r, b = g("sharpe_simple")
+        rows.append(["Sharpe (Simple)", fmt_num2(r), fmt_num2(b), fmt_num2(r - b) if not (np.isnan(r) or np.isnan(b)) else "—"])
+        r, b = g("max_drawdown")
+        rows.append(["Max Drawdown", fmt_pct(r), fmt_pct(b), fmt_pct(r - b) if not (np.isnan(r) or np.isnan(b)) else "—"])
+        ir = gq("information_ratio")
+        rows.append(["Information Ratio", fmt_num2(ir), "—", "—"])
+        te = gq("tracking_error")
+        rows.append(["Tracking Error", fmt_pct(te), "—", "—"])
+        r, b = g("hit_rate")
+        rows.append(["Hit Rate", fmt_pct(r), fmt_pct(b), fmt_pct(r - b) if not (np.isnan(r) or np.isnan(b)) else "—"])
+        md = gq("max_relative_dd")
+        rows.append(["Max Monthly Underperf.", fmt_pct(md), "—", "—"])
         return rows
 
-    is_rows   = build_perf_rows(metrics_is,  "IS (2016–2020)")
-    oos_rows  = build_perf_rows(metrics_oos, "OOS (2021–2024)")
-    full_rows = build_perf_rows(metrics_full,"Full (2016–2024)")
+    # ── OOS Table ──
+    fig.text(0.07, 0.90, "Out-of-Sample Period (2021–2024)", ha="left", va="top",
+             fontsize=12, fontweight="bold", color=DARK_BLUE,
+             fontfamily="serif", transform=fig.transFigure)
 
-    all_rows = is_rows + oos_rows + full_rows
-    tbl_df = pd.DataFrame(all_rows, columns=["Period", "Portfolio", "Value", "Metric"])
-    # pivot
-    pivot = tbl_df.pivot_table(index=["Metric", "Period"], columns="Portfolio",
-                                values="Value", aggfunc="first")
-    pivot = pivot.reset_index()
-    pivot.columns.name = None
+    oos_rows = build_comparison_table(metrics_oos)
+    oos_df = pd.DataFrame(oos_rows, columns=["Metric", "QS Portfolio", "Benchmark", "Δ (QS−BNCH)"])
+    ax_oos = fig.add_axes([0.05, 0.56, 0.90, 0.30])
+    draw_table(ax_oos, oos_df,
+               col_widths=[2.2, 1.2, 1.2, 1.2],
+               fontsize=9.5, header_fontsize=10)
 
-    # clean display order
-    metric_order = ["Ann. Return", "Ann. Volatility", "Sharpe (NW)",
-                    "Max Drawdown", "Info Ratio", "Tracking Error",
-                    "Hit Rate", "Max Monthly Underperf."]
-    period_order = ["IS (2016–2020)", "OOS (2021–2024)", "Full (2016–2024)"]
+    # ── Full Period Table ──
+    fig.text(0.07, 0.51, "Full Period (2016–2024)", ha="left", va="top",
+             fontsize=12, fontweight="bold", color=DARK_BLUE,
+             fontfamily="serif", transform=fig.transFigure)
 
-    rows_display = []
-    for m in metric_order:
-        for p in period_order:
-            sub = pivot[(pivot["Metric"] == m) & (pivot["Period"] == p)]
-            if not sub.empty:
-                qs_v  = sub["QS"].values[0]  if "QS"   in sub.columns else "—"
-                bn_v  = sub["BNCH"].values[0] if "BNCH" in sub.columns else "—"
-                rows_display.append([m, p, qs_v if qs_v else "—", bn_v if bn_v else "—"])
-
-    display_df = pd.DataFrame(rows_display, columns=["Metric", "Period", "QS Portfolio", "Benchmark"])
-
-    ax_tbl = fig.add_axes([0.04, 0.08, 0.92, 0.82])
-    draw_table(ax_tbl, display_df,
-               col_widths=[2.2, 1.6, 1.2, 1.2],
-               fontsize=8.2, header_fontsize=9)
-
-    pdf.savefig(fig, bbox_inches="tight")
-    plt.close(fig)
-    print("Page 3 done")
-
-    # ── PAGE 4 — Cumulative Returns Full ────────────────────────────────────
-    fig = plt.figure(figsize=LANDSCAPE)
-    fig.patch.set_facecolor(WHITE)
-    page_header(fig, "Cumulative Returns — Full Period (2016–2024)", y=0.97)
-    page_footer(fig, 4)
-
-    img_path = os.path.join(OUTPUTS, "cumulative_returns_Full.png")
-    img = plt.imread(img_path)
-    ax = fig.add_axes([0.05, 0.08, 0.90, 0.84])
-    ax.imshow(img, aspect="auto")
-    ax.axis("off")
+    full_rows = build_comparison_table(metrics_full)
+    full_df = pd.DataFrame(full_rows, columns=["Metric", "QS Portfolio", "Benchmark", "Δ (QS−BNCH)"])
+    ax_full = fig.add_axes([0.05, 0.17, 0.90, 0.30])
+    draw_table(ax_full, full_df,
+               col_widths=[2.2, 1.2, 1.2, 1.2],
+               fontsize=9.5, header_fontsize=10)
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
     print("Page 4 done")
 
-    # ── PAGE 5 — Cumulative Returns OOS ────────────────────────────────────
+    # ── PAGE 5 — Cumulative Returns OOS (shown first) ──────────────────────
     fig = plt.figure(figsize=LANDSCAPE)
     fig.patch.set_facecolor(WHITE)
     page_header(fig, "Cumulative Returns — Out-of-Sample Period (2021–2024)", y=0.97)
@@ -466,13 +489,13 @@ with PdfPages(REPORT) as pdf:
     plt.close(fig)
     print("Page 5 done")
 
-    # ── PAGE 6 — Monthly Active Returns ────────────────────────────────────
+    # ── PAGE 6 — Cumulative Returns Full ──────────────────────────────────
     fig = plt.figure(figsize=LANDSCAPE)
     fig.patch.set_facecolor(WHITE)
-    page_header(fig, "Monthly Active Returns — Full Period (2016–2024)", y=0.97)
+    page_header(fig, "Cumulative Returns — Full Period (2016–2024)", y=0.97)
     page_footer(fig, 6)
 
-    img_path = os.path.join(OUTPUTS, "active_returns_Full.png")
+    img_path = os.path.join(OUTPUTS, "cumulative_returns_Full.png")
     img = plt.imread(img_path)
     ax = fig.add_axes([0.05, 0.08, 0.90, 0.84])
     ax.imshow(img, aspect="auto")
@@ -482,11 +505,27 @@ with PdfPages(REPORT) as pdf:
     plt.close(fig)
     print("Page 6 done")
 
-    # ── PAGE 7 — Factor Exposure Deviations ─────────────────────────────────
+    # ── PAGE 7 — Monthly Active Returns ────────────────────────────────────
+    fig = plt.figure(figsize=LANDSCAPE)
+    fig.patch.set_facecolor(WHITE)
+    page_header(fig, "Monthly Active Returns — Full Period (2016–2024)", y=0.97)
+    page_footer(fig, 7)
+
+    img_path = os.path.join(OUTPUTS, "active_returns_Full.png")
+    img = plt.imread(img_path)
+    ax = fig.add_axes([0.05, 0.08, 0.90, 0.84])
+    ax.imshow(img, aspect="auto")
+    ax.axis("off")
+
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+    print("Page 7 done")
+
+    # ── PAGE 8 — Factor Exposure Deviations ─────────────────────────────────
     fig = plt.figure(figsize=LANDSCAPE)
     fig.patch.set_facecolor(WHITE)
     page_header(fig, "Factor Exposure Deviations from Benchmark — Full Period", y=0.97)
-    page_footer(fig, 7)
+    page_footer(fig, 8)
 
     img_path = os.path.join(OUTPUTS, "factor_exposure_Full.png")
     img = plt.imread(img_path)
@@ -505,40 +544,47 @@ with PdfPages(REPORT) as pdf:
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
-    print("Page 7 done")
+    print("Page 8 done")
 
-    # ── PAGE 8 — Rolling Sharpe + Drawdown ──────────────────────────────────
+    # ── PAGE 9 — Rolling Sharpe + Drawdown + Weight Distribution ──────────
     fig = plt.figure(figsize=LANDSCAPE)
     fig.patch.set_facecolor(WHITE)
-    page_header(fig, "Rolling Sharpe Ratio & Drawdown — Full Period", y=0.97)
-    page_footer(fig, 8)
+    page_header(fig, "Rolling Sharpe Ratio, Drawdown & Weight Distribution", y=0.97)
+    page_footer(fig, 9)
 
-    gs = gridspec.GridSpec(1, 2, figure=fig, left=0.05, right=0.95,
-                           top=0.90, bottom=0.06, wspace=0.06)
+    gs = gridspec.GridSpec(2, 2, figure=fig, left=0.05, right=0.95,
+                           top=0.90, bottom=0.06, wspace=0.06, hspace=0.12)
 
-    ax1 = fig.add_subplot(gs[0])
+    ax1 = fig.add_subplot(gs[0, :])
     img1 = plt.imread(os.path.join(OUTPUTS, "rolling_sharpe_Full.png"))
     ax1.imshow(img1, aspect="auto")
     ax1.axis("off")
     ax1.set_title("Rolling 12-Month Sharpe Ratio", fontsize=10, color=DARK_BLUE,
                   fontweight="bold", pad=4)
 
-    ax2 = fig.add_subplot(gs[1])
+    ax2 = fig.add_subplot(gs[1, 0])
     img2 = plt.imread(os.path.join(OUTPUTS, "drawdown_Full.png"))
     ax2.imshow(img2, aspect="auto")
     ax2.axis("off")
     ax2.set_title("Drawdown Profile", fontsize=10, color=DARK_BLUE,
                   fontweight="bold", pad=4)
 
+    ax3 = fig.add_subplot(gs[1, 1])
+    img3 = plt.imread(os.path.join(OUTPUTS, "weight_distribution_Full.png"))
+    ax3.imshow(img3, aspect="auto")
+    ax3.axis("off")
+    ax3.set_title("Active Weight Distribution", fontsize=10, color=DARK_BLUE,
+                  fontweight="bold", pad=4)
+
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
-    print("Page 8 done")
+    print("Page 9 done")
 
-    # ── PAGE 9 — Constraint Compliance ──────────────────────────────────────
+    # ── PAGE 10 — Constraint Compliance ─────────────────────────────────────
     fig = plt.figure(figsize=PORTRAIT)
     fig.patch.set_facecolor(WHITE)
     page_header(fig, "Constraint Compliance Report", y=0.96)
-    page_footer(fig, 9)
+    page_footer(fig, 10)
 
     # Summary banner
     rect = FancyBboxPatch((0.10, 0.86), 0.80, 0.060,
@@ -616,13 +662,13 @@ with PdfPages(REPORT) as pdf:
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
-    print("Page 9 done")
+    print("Page 10 done")
 
-    # ── PAGE 10 — Feature Ablation ───────────────────────────────────────────
+    # ── PAGE 11 — Feature Ablation ───────────────────────────────────────────
     fig = plt.figure(figsize=PORTRAIT)
     fig.patch.set_facecolor(WHITE)
     page_header(fig, "Feature Ablation Study", y=0.96)
-    page_footer(fig, 10)
+    page_footer(fig, 11)
 
     # description
     desc_lines = [
@@ -682,13 +728,13 @@ with PdfPages(REPORT) as pdf:
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
-    print("Page 10 done")
+    print("Page 11 done")
 
-    # ── PAGE 11 — Preprocessing Comparison ──────────────────────────────────
+    # ── PAGE 12 — Preprocessing Comparison ──────────────────────────────────
     fig = plt.figure(figsize=PORTRAIT)
     fig.patch.set_facecolor(WHITE)
     page_header(fig, "Preprocessing Method Comparison: Rank-Norm vs Box-Cox+Z-Score", y=0.96)
-    page_footer(fig, 11)
+    page_footer(fig, 12)
 
     desc2 = [
         "Two cross-sectional preprocessing pipelines were evaluated to assess sensitivity of strategy",
@@ -733,7 +779,7 @@ with PdfPages(REPORT) as pdf:
         "Δ (BxZ−RN)":   ["+0.06pp", "+0.03pp", "+0.0016", "+1.14pp", "+0.0506"],
     })
 
-    ax_full = fig.add_axes([0.05, 0.35, 0.90, 0.20])
+    ax_full = fig.add_axes([0.05, 0.32, 0.90, 0.20])
     draw_table(ax_full, full_prep,
                col_widths=[1.6, 1.2, 1.2, 1.2, 1.2],
                fontsize=9, header_fontsize=9.5)
@@ -764,13 +810,13 @@ with PdfPages(REPORT) as pdf:
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
-    print("Page 11 done")
+    print("Page 12 done")
 
-    # ── PAGE 12 — Methodology ────────────────────────────────────────────────
+    # ── PAGE 13 — Methodology ────────────────────────────────────────────────
     fig = plt.figure(figsize=PORTRAIT)
     fig.patch.set_facecolor(WHITE)
     page_header(fig, "Methodology", y=0.96)
-    page_footer(fig, 12)
+    page_footer(fig, 13)
 
     method_sections = [
         ("1. Benchmark Construction", [
@@ -849,64 +895,62 @@ with PdfPages(REPORT) as pdf:
                      color=TEXT_DARK, fontfamily="serif",
                      transform=fig.transFigure)
             y_m -= 0.017
-        y_m -= 0.008
+        y_m -= 0.018
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
-    print("Page 12 done")
+    print("Page 13 done")
 
-    # ── PAGE 13 — Discussion & Conclusion ────────────────────────────────────
+    # ── PAGE 14 — Discussion & Conclusion ────────────────────────────────────
     fig = plt.figure(figsize=PORTRAIT)
     fig.patch.set_facecolor(WHITE)
     page_header(fig, "Discussion & Conclusion", y=0.96)
-    page_footer(fig, 13)
+    page_footer(fig, 14)
 
     disc_sections = [
         ("Iterative Improvement Summary", [
-            "v1: Fixed 200 trees, no early stopping → OOS IR ≈ 0",
-            "v2: +Early stopping (patience=20) → OOS IR = 0.46",
-            "v3: +Purge (remove val leakage) → OOS IR = 0.78 (588-649 stocks)",
-            "v4: +Top 500 filter + EMA(0.3) + CVaR + post-hoc guard → OOS IR = 0.61, 0 violations",
-            "",
-            "Key insight: drawdown violations from raw signal noise, not insufficient constraints.",
-            "EMA smoothing (not CVaR) was the effective fix for the -2% drawdown requirement.",
+            "v1→v4: Fixed trees (IR≈0) → +early stopping (IR=0.46) → +purge (IR=0.78)",
+            "  → +Top500 + EMA(0.3) + CVaR + post-hoc guard → OOS IR=0.61, 0 violations.",
+            "Key insight: drawdown violations came from signal noise, not insufficient constraints.",
         ]),
         ("EMA Signal Smoothing — The Key Innovation", [
-            "Raw XGBoost signal has rank correlation ~0.45 month-to-month, causing 35% turnover.",
-            "EMA(alpha=0.3) smoothing: mu(t) = 0.3*raw(t) + 0.7*mu(t-1), half-life ~2 months.",
-            "Effect: signal std reduced to 77% of original; extreme rebalancing eliminated.",
+            "Raw signal rank corr ~0.45 month-to-month, causing 35% turnover.",
+            "EMA(α=0.3): μ(t) = 0.3·raw(t) + 0.7·μ(t−1), half-life ≈ 2 months.",
+            "Effect: signal std reduced to 77%; extreme rebalancing eliminated.",
+            "6-way experiment: EMA is the only transform eliminating drawdown violations.",
             "",
-            "6-way experiment (3 transforms × 2 optimizers) showed EMA is the only transform",
-            "that eliminates drawdown violations. Z-score and Rank both fail (IR≈0, 1 violation).",
-            "CVaR vs TE-only makes no difference under EMA (constraint not binding).",
+            "Alpha sensitivity: OOS IC is flat across α ∈ [0.1, 0.7] (range: −0.021 to −0.023),",
+            "confirming α=0.3 is not over-tuned. Chosen for ≈2-month half-life matching",
+            "typical signal persistence in monthly equity cross-sections.",
         ]),
         ("Constraint Effectiveness", [
-            "All three hard constraints satisfied 100% across 108 months:",
-            "  • Weight bounds: 0 violations (54,000 stock-months checked)",
-            "  • Factor exposure: max deviation 0.057 (limit 0.10), 0 violations",
-            "  • Monthly active return: worst = −1.46% (limit −2.00%), 0 violations",
-            "",
-            "Dual-layer downside protection: CVaR constraint (ex-ante, worst 5% scenarios ≤ 2%)",
-            "+ post-hoc drawdown guard (shrink active weights if prior month < −1.5%).",
+            "All three constraints satisfied 100% across 108 months (0 violations):",
+            "  • Weight bounds: max single violation 1.8e-5 (solver tolerance)",
+            "  • Factor exposure: max deviation 0.057 (limit 0.10)",
+            "  • Monthly active return: worst = −1.46% (limit −2.00%)",
+        ]),
+        ("Transaction Costs & Turnover", [
+            "Mean monthly turnover: 12.9% (Full), 13.9% (OOS) → annual ≈ 155–167%.",
+            "At 10bps round-trip TC, estimated annual drag ≈ 0.15% (Full), 0.17% (OOS).",
+            "After TC, OOS excess return ≈ +1.7% (vs +1.9% gross). Impact is modest",
+            "because the constrained optimizer limits active weights to ≤ 2× benchmark.",
         ]),
         ("Limitations & Future Work", [
-            "• No transaction costs modeled — monthly rebalancing incurs turnover costs.",
-            "• No refit after selection: model trained on 85% of data, not retrained on full.",
+            "• No refit after selection: model trained on 85% of data.",
             "• Data gap: OpenAssetPricing feature coverage drops in 2023–2024.",
             "• QS volatility (17.0%) is 8% higher than BNCH (15.7%).",
-            "• Future: refit after selection, embargo > 0, adaptive EMA alpha,",
-            "  regime-adaptive λ refitting, transaction cost modeling.",
+            "• OOS IR=0.61 is not statistically significant (p=0.23, see page 15).",
+            "• Future: refit after selection, embargo > 0, regime-adaptive λ refitting.",
         ]),
         ("Conclusion", [
             "This study presents a constrained long-only portfolio combining XGBoost ML signals",
             "with 11 traditional and option-implied features. The final strategy (v4) uses EMA",
             "signal smoothing + CVaR constraint + post-hoc drawdown guard to achieve OOS IR of",
-            "0.61 with +1.9% excess return, while satisfying all constraints 100% (0 violations).",
+            "0.61 with +1.9% excess return, while satisfying all constraints 100%.",
             "",
             "Key contributions: (1) EMA signal smoothing as the effective solution for drawdown",
-            "control — treating signal noise at the source rather than constraining the optimizer;",
-            "(2) purge fix for validation set leakage in walk-forward early stopping;",
-            "(3) comprehensive 6-way experiment demonstrating EMA superiority over Z-score/Rank.",
+            "control; (2) purge fix for val set leakage in walk-forward early stopping;",
+            "(3) comprehensive robustness analysis with statistical significance tests.",
         ]),
     ]
 
@@ -932,11 +976,83 @@ with PdfPages(REPORT) as pdf:
                      color=TEXT_DARK, fontfamily="serif",
                      transform=fig.transFigure)
             y_dc -= 0.016
-        y_dc -= 0.008
+        y_dc -= 0.018
 
     pdf.savefig(fig, bbox_inches="tight")
     plt.close(fig)
-    print("Page 13 done")
+    print("Page 14 done")
+
+    # ── PAGE 15 — Robustness & Statistical Significance ────────────────────
+    stat_tests_path = os.path.join(OUTPUTS, "statistical_tests.csv")
+    ema_path = os.path.join(OUTPUTS, "ema_sensitivity.csv")
+    ic_chart_path = os.path.join(OUTPUTS, "ic_timeseries_oos.png")
+
+    if all(os.path.exists(p) for p in [stat_tests_path, ema_path, ic_chart_path]):
+        fig = plt.figure(figsize=PORTRAIT)
+        fig.patch.set_facecolor(WHITE)
+        page_header(fig, "Robustness & Statistical Significance", y=0.96)
+        page_footer(fig, 15)
+
+        # IC time series chart
+        ic_chart = plt.imread(ic_chart_path)
+        ax_ic = fig.add_axes([0.05, 0.68, 0.90, 0.24])
+        ax_ic.imshow(ic_chart, aspect="auto")
+        ax_ic.axis("off")
+
+        # Statistical significance table
+        fig.text(0.07, 0.65, "Statistical Significance Tests (Lo 2002)",
+                 ha="left", va="top", fontsize=10, fontweight="bold",
+                 color=DARK_BLUE, fontfamily="serif", transform=fig.transFigure)
+
+        stat_df = pd.read_csv(stat_tests_path)
+        ax_stat = fig.add_axes([0.05, 0.43, 0.90, 0.20])
+        draw_table(ax_stat, stat_df,
+                   col_widths=[1.0, 0.8, 1.0, 1.0, 1.0, 0.7],
+                   fontsize=9, header_fontsize=9.5)
+
+        fig.text(0.07, 0.42,
+                 "Lo (2002): t = (\u03bc/\u03c3) \u00d7 \u221aN.  "
+                 "IC significance: t = mean(IC) / se(IC).  "
+                 "* p<0.10,  ** p<0.05,  *** p<0.01",
+                 ha="left", va="top", fontsize=7.5, color="grey",
+                 fontfamily="serif", transform=fig.transFigure)
+
+        # EMA alpha sensitivity table
+        fig.text(0.07, 0.38, "EMA Alpha Sensitivity (OOS 2021\u20132024)",
+                 ha="left", va="top", fontsize=10, fontweight="bold",
+                 color=DARK_BLUE, fontfamily="serif", transform=fig.transFigure)
+
+        ema_df = pd.read_csv(ema_path)
+        ema_display = ema_df.copy()
+        ema_display.columns = ["Alpha", "Mean IC", "Std IC", "ICIR", "t-stat", "p-value"]
+        ema_display["Alpha"] = ema_display["Alpha"].map(lambda x: f"{x:.1f}")
+        ema_display["Mean IC"] = ema_display["Mean IC"].map(lambda x: f"{x:.4f}")
+        ema_display["Std IC"] = ema_display["Std IC"].map(lambda x: f"{x:.4f}")
+        ema_display["ICIR"] = ema_display["ICIR"].map(lambda x: f"{x:.4f}")
+        ema_display["t-stat"] = ema_display["t-stat"].map(lambda x: f"{x:.3f}")
+        ema_display["p-value"] = ema_display["p-value"].map(lambda x: f"{x:.3f}")
+
+        chosen_idx = ema_df.index[ema_df["Alpha"].round(1) == 0.3].tolist()
+        row_colors = {chosen_idx[0]: "#FFF3E0"} if chosen_idx else None
+
+        ax_ema = fig.add_axes([0.05, 0.13, 0.90, 0.23])
+        draw_table(ax_ema, ema_display,
+                   col_widths=[0.8, 1.0, 1.0, 1.0, 1.0, 1.0],
+                   row_colors=row_colors,
+                   fontsize=9, header_fontsize=9.5)
+
+        fig.text(0.07, 0.10,
+                 "Orange row = production \u03b1 (0.3). IC is flat across all alphas, "
+                 "confirming \u03b1=0.3 is not a tuned parameter \u2014 chosen for "
+                 "\u22482-month half-life.",
+                 ha="left", va="top", fontsize=7.5, color="grey",
+                 fontfamily="serif", transform=fig.transFigure)
+
+        pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+        print("Page 15 done")
+    else:
+        print("WARNING: robustness outputs not found. Run src/robustness.py first. Page 15 skipped.")
 
     # PDF metadata
     d = pdf.infodict()

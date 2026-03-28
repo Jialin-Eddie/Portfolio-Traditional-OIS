@@ -7,6 +7,8 @@ SRC = ROOT / "src"
 DATA = ROOT / "data"
 OUTPUTS = ROOT / "outputs"
 
+# Data: https://drive.google.com/file/d/1kczsMeHAfiBnMxei667iLGbsRnDGLCwo/view?usp=sharing
+# Download final_panel.parquet and place at ../01HW_QT/Data/Output/final_panel.parquet
 HW1_ROOT = ROOT.parent / "01HW_QT"
 FINAL_PANEL = HW1_ROOT / "Data" / "Output" / "final_panel.parquet"
 

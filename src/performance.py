@@ -200,6 +200,7 @@ def plot_cumulative_returns(
     ax.set_title(title, fontsize=13)
     ax.set_xlabel("Date")
     ax.set_ylabel("Cumulative Return")
+    ax.set_xlim(qs_cum.index[0], qs_cum.index[-1])
     ax.legend(frameon=False)
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
