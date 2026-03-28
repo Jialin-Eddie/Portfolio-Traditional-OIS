@@ -6,6 +6,7 @@ import pandas as pd
 from src.config import (
     FINAL_PANEL, ALL_FEATURES, BETA_COLS, FF4_FACTORS,
     RET_COL, MKTCAP_COL, UNIVERSE_COVERAGE_THRESHOLD,
+    UNIVERSE_MAX_STOCKS, UNIVERSE_MIN_STOCKS,
     RESID_SIGNAL_WIN, RESID_SIGNAL_SKIP, OUTPUTS,
 )
 
@@ -144,12 +145,43 @@ def resample_monthly(df: pd.DataFrame) -> pd.DataFrame:
     return monthly
 
 
+def filter_top_n(monthly: pd.DataFrame) -> pd.DataFrame:
+    """Keep top UNIVERSE_MAX_STOCKS stocks by market cap per month.
+
+    Stocks with NaN mktcap are excluded from ranking.
+    Asserts each month retains at least UNIVERSE_MIN_STOCKS stocks.
+    """
+    print(f"[data_loader] Filtering to top {UNIVERSE_MAX_STOCKS} by market cap per month ...")
+    before = monthly.shape[0]
+
+    def _top_n(group):
+        valid = group.dropna(subset=[MKTCAP_COL])
+        return valid.nlargest(min(UNIVERSE_MAX_STOCKS, len(valid)), MKTCAP_COL)
+
+    monthly = monthly.groupby(level="month_end", group_keys=False).apply(_top_n)
+
+    counts = monthly.groupby(level="month_end").size()
+    min_count = counts.min()
+    max_count = counts.max()
+    assert min_count >= UNIVERSE_MIN_STOCKS, (
+        f"Month {counts.idxmin().date()} has only {min_count} stocks "
+        f"(minimum required: {UNIVERSE_MIN_STOCKS})"
+    )
+
+    after = monthly.shape[0]
+    n_stocks = monthly.index.get_level_values("permno").nunique()
+    print(f"  Before: {before:,} rows → After: {after:,} rows (dropped {before - after:,})")
+    print(f"  Stocks per month: min={min_count}, max={max_count}, unique={n_stocks}")
+    return monthly
+
+
 def load_and_prepare() -> pd.DataFrame:
-    """Full pipeline: load -> resid_signal -> filter -> monthly."""
+    """Full pipeline: load -> resid_signal -> filter -> monthly -> top_n."""
     df = load_panel()
     df = compute_resid_signal(df)
     df = filter_universe(df)
     monthly = resample_monthly(df)
+    monthly = filter_top_n(monthly)
     del df
     gc.collect()
 
