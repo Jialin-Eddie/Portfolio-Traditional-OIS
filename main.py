@@ -37,7 +37,7 @@ from src.preprocessing import (
     save_pipeline,
 )
 from src.benchmark import build_benchmark
-from src.signals import generate_signals
+from src.signals import generate_signals, smooth_signals_ema
 from src.optimizer import optimize_all_months
 from src.backtest import run_backtest
 from src.constraints import (
@@ -119,6 +119,7 @@ def main(skip_data_load: bool = False) -> None:
     t4 = time.time()
 
     predictions = generate_signals(monthly_proc)
+    predictions = smooth_signals_ema(predictions)
     print(f"  Stage 4 done ({_elapsed(t4)})")
 
     # ==================================================================

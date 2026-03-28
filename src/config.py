@@ -56,6 +56,13 @@ XGB_VAL_FRACTION = 0.15
 PURGE_MONTHS = 1   # remove val rows whose fwd_ret overlaps predict_month
 EMBARGO_MONTHS = 0  # additional gap between val end and predict_month
 
+CVAR_ALPHA = 0.95              # CVaR confidence level (worst 5% of scenarios)
+CVAR_LIMIT_MONTHLY = 0.02      # max expected active loss in worst 5% scenarios
+DD_WARNING_THRESHOLD = -0.015   # post-hoc: shrink if previous month active < this
+DD_SHRINK_FACTOR = 0.5          # post-hoc: shrink active weights by this factor
+
+EMA_ALPHA = 0.3                 # signal smoothing: 30% new + 70% history, half-life ~2 months
+
 COV_WINDOW_MONTHS = 36
 NW_LAGS = 4
 ANNUALIZE_MONTHLY = 12

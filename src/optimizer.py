@@ -17,6 +17,10 @@ from sklearn.covariance import LedoitWolf
 from src.config import (
     BETA_COLS,
     COV_WINDOW_MONTHS,
+    CVAR_ALPHA,
+    CVAR_LIMIT_MONTHLY,
+    DD_SHRINK_FACTOR,
+    DD_WARNING_THRESHOLD,
     MAX_FACTOR_DEV,
     MAX_FACTOR_DEV_OPTIM,
     MAX_WEIGHT_MULT,
@@ -92,6 +96,9 @@ def solve_portfolio(
     te_max: float = TE_MAX_MONTHLY,
     max_factor_dev: float = MAX_FACTOR_DEV_OPTIM,
     target_sum: float = 1.0,
+    historical_returns: Optional[np.ndarray] = None,
+    cvar_alpha: float = CVAR_ALPHA,
+    cvar_limit: float = CVAR_LIMIT_MONTHLY,
 ) -> np.ndarray:
     """
     Solve the mean-variance optimization problem with factor and TE constraints.
@@ -129,7 +136,7 @@ def solve_portfolio(
     """
     N = len(mu)
 
-    def _build_and_solve(te: float) -> tuple[Optional[np.ndarray], str]:
+    def _build_and_solve(te: float, cv_limit: float) -> tuple[Optional[np.ndarray], str]:
         w = cp.Variable(N)
         objective = cp.Maximize(mu @ w)
 
@@ -151,6 +158,18 @@ def solve_portfolio(
         cov_psd = cp.psd_wrap(cov)
         constraints.append(cp.quad_form(active, cov_psd) <= te**2)
 
+        # CVaR constraint on active returns
+        if historical_returns is not None and len(historical_returns) >= 12:
+            S = historical_returns.shape[0]
+            zeta = cp.Variable()
+            u = cp.Variable(S, nonneg=True)
+            active_w = w - w_bench
+            for s in range(S):
+                constraints.append(u[s] >= -(historical_returns[s] @ active_w) - zeta)
+            constraints.append(
+                zeta + cp.sum(u) / ((1 - cvar_alpha) * S) <= cv_limit
+            )
+
         prob = cp.Problem(objective, constraints)
         try:
             prob.solve(solver=cp.SCS, verbose=False)
@@ -165,31 +184,36 @@ def solve_portfolio(
             return w.value, status
         return None, status if status else "unknown"
 
-    # First attempt with nominal te_max
-    w_opt, status = _build_and_solve(te_max)
-    if w_opt is not None:
-        return w_opt
+    # Relaxation ladder: (cvar_limit, te_max) pairs
+    relaxation_ladder = [
+        (cvar_limit, te_max),
+        (0.025, 0.02),
+        (0.03, 0.025),
+        (0.04, 0.03),
+    ]
 
-    # Relax tracking error up to 3x in 50% increments
-    warnings.warn(
-        f"  [Solver] Infeasible at te_max={te_max:.4f} (status={status}). "
-        "Relaxing TE constraint.",
-        stacklevel=2,
-    )
-    for multiplier in [1.5, 2.0, 3.0]:
-        relaxed_te = te_max * multiplier
-        w_opt, status = _build_and_solve(relaxed_te)
+    for i, (cv_lim, te_lim) in enumerate(relaxation_ladder):
+        w_opt, status = _build_and_solve(te_lim, cv_lim)
         if w_opt is not None:
+            if i > 0:
+                warnings.warn(
+                    f"  [Solver] Solved with relaxed cvar_limit={cv_lim:.3f}, "
+                    f"te_max={te_lim:.4f} (ladder step {i}).",
+                    stacklevel=2,
+                )
+            return w_opt
+        if i == 0:
             warnings.warn(
-                f"  [Solver] Solved with relaxed te_max={relaxed_te:.4f} "
-                f"(x{multiplier}).",
+                f"  [Solver] Infeasible at cvar_limit={cv_lim:.3f}, "
+                f"te_max={te_lim:.4f} (status={status}). Relaxing constraints.",
                 stacklevel=2,
             )
-            return w_opt
-        warnings.warn(
-            f"  [Solver] Still infeasible at te_max={relaxed_te:.4f} (status={status}).",
-            stacklevel=2,
-        )
+        else:
+            warnings.warn(
+                f"  [Solver] Still infeasible at cvar_limit={cv_lim:.3f}, "
+                f"te_max={te_lim:.4f} (status={status}).",
+                stacklevel=2,
+            )
 
     # Final fallback: return benchmark weights
     warnings.warn(
@@ -197,6 +221,30 @@ def solve_portfolio(
         stacklevel=2,
     )
     return w_bench.copy()
+
+
+# ---------------------------------------------------------------------------
+# Post-hoc drawdown guard
+# ---------------------------------------------------------------------------
+
+def _apply_drawdown_guard(
+    w_opt: np.ndarray,
+    w_bench: np.ndarray,
+    realized_active_returns: list,
+    warning_threshold: float = DD_WARNING_THRESHOLD,
+    shrink_factor: float = DD_SHRINK_FACTOR,
+) -> tuple:
+    """Shrink active weights if recent active return is dangerously negative.
+
+    Returns (adjusted_weights, was_shrunk).
+    """
+    if len(realized_active_returns) < 1:
+        return w_opt, False
+    last_active = realized_active_returns[-1]
+    if last_active < warning_threshold:
+        active = w_opt - w_bench
+        return w_bench + shrink_factor * active, True
+    return w_opt, False
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +291,25 @@ def optimize_all_months(
     # Minimum months of return history needed before optimizing
     MIN_HISTORY = 12
 
+    # Drawdown guard state
+    realized_active: list = []
+    prev_qs_weights: Optional[dict] = None
+    prev_bench_weights: Optional[dict] = None
+    prev_month: Optional[pd.Timestamp] = None
+
     for month_end in rebalance_dates:
+        # --- Compute previous month's realized active return (backward-looking) ---
+        if prev_qs_weights is not None and prev_month is not None and prev_month in monthly.index:
+            fwd_ret_row = monthly.loc[prev_month].fillna(0.0)
+            qs_ret = sum(
+                prev_qs_weights.get(int(p), prev_qs_weights.get(p, 0)) * fwd_ret_row.get(p, 0)
+                for p in fwd_ret_row.index
+            )
+            bench_ret = sum(
+                prev_bench_weights.get(int(p), prev_bench_weights.get(p, 0)) * fwd_ret_row.get(p, 0)
+                for p in fwd_ret_row.index
+            )
+            realized_active.append(qs_ret - bench_ret)
         # --- Slice this month's data ---
         pred_m = preds[preds["month_end"] == month_end].set_index("permno")["pred"]
         bw_m = bweights[bweights["month_end"] == month_end].set_index("permno")["weight"]
@@ -303,10 +369,13 @@ def optimize_all_months(
             print(f"  [{month_end.date()}] Zero benchmark weights — skipping.")
             continue
 
-        # --- Covariance ---
+        # --- Covariance + historical return scenarios for CVaR ---
         ret_cols = monthly.columns.intersection(valid_stocks)
         ret_subset = monthly[ret_cols].reindex(columns=valid_stocks, fill_value=np.nan)
         cov = estimate_covariance(ret_subset, month_end)
+
+        hist_mask = monthly.index <= month_end
+        hist_returns = ret_subset.loc[hist_mask].tail(COV_WINDOW_MONTHS).fillna(0.0).values
 
         # --- Arrays (ensure no NaN) ---
         mu = np.nan_to_num(pred_m.values.astype(float), nan=0.0)
@@ -318,8 +387,16 @@ def optimize_all_months(
         beta_bench_vec = np.nan_to_num(beta_bench_vec, nan=0.0)
 
         # --- Solve ---
-        w_opt = solve_portfolio(mu, w_bench, betas_arr, beta_bench_vec, cov,
-                                target_sum=target_sum)
+        w_opt = solve_portfolio(
+            mu, w_bench, betas_arr, beta_bench_vec, cov,
+            target_sum=target_sum,
+            historical_returns=hist_returns,
+        )
+
+        # --- Post-hoc drawdown guard ---
+        w_opt, was_shrunk = _apply_drawdown_guard(w_opt, w_bench, realized_active)
+        if was_shrunk:
+            print(f"  [{month_end.date()}] DRAWDOWN GUARD: shrunk active weights by {DD_SHRINK_FACTOR}")
 
         # --- Diagnostics ---
         active = w_opt - w_bench
@@ -340,6 +417,15 @@ def optimize_all_months(
         excluded = all_month_bw.index.difference(valid_stocks)
         for permno in excluded:
             records.append({"permno": permno, "month_end": month_end, "opt_weight": all_month_bw[permno]})
+
+        # --- Store weights for next iteration's realized active return calc ---
+        prev_qs_weights = dict(zip(valid_stocks, w_opt))
+        for permno in excluded:
+            prev_qs_weights[permno] = all_month_bw[permno]
+        prev_bench_weights = dict(zip(bw_m.index, bw_m.values))
+        for permno in excluded:
+            prev_bench_weights[permno] = all_month_bw[permno]
+        prev_month = month_end
 
     if not records:
         print("[Optimizer] No records produced — returning empty DataFrame.")

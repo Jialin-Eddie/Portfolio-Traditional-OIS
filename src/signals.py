@@ -15,6 +15,7 @@ from src.config import (
     XGB_VAL_FRACTION,
     PURGE_MONTHS,
     EMBARGO_MONTHS,
+    EMA_ALPHA,
     SPLIT_DATE,
     ALL_FEATURES,
     OUTPUTS,
@@ -212,6 +213,33 @@ def walk_forward_oos(
               f"(over {len(valid_ics)} months with realized returns)")
 
     return oos_preds
+
+
+def smooth_signals_ema(preds: pd.DataFrame, alpha: float = EMA_ALPHA) -> pd.DataFrame:
+    """Apply per-stock EMA smoothing to reduce signal noise and turnover.
+
+    Parameters
+    ----------
+    preds:
+        DataFrame with MultiIndex (permno, month_end) and column `y_pred`.
+    alpha:
+        EMA decay factor. Lower = smoother. Default 0.3 (half-life ~2 months).
+
+    Returns
+    -------
+    smoothed:
+        Same structure, with `y_pred` replaced by EMA-smoothed values.
+    """
+    out = preds.copy()
+    out["y_pred"] = out.groupby(level="permno")["y_pred"].transform(
+        lambda x: x.ewm(alpha=alpha, adjust=False).mean()
+    )
+    before_std = preds["y_pred"].std()
+    after_std = out["y_pred"].std()
+    print(f"[signals] EMA smoothing (alpha={alpha}): "
+          f"signal std {before_std:.6f} → {after_std:.6f} "
+          f"({after_std/before_std:.1%} of original)")
+    return out
 
 
 def generate_signals(monthly: pd.DataFrame) -> pd.DataFrame:
