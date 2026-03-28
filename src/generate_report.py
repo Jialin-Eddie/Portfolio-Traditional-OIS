@@ -215,8 +215,8 @@ with PdfPages(REPORT) as pdf:
               transform=fig.transFigure)
 
     results = [
-        ("OOS Excess Return", "≈ 0.00%", "#E8F5E9", "#1E8E3E"),
-        ("Full-Period IR", "1.26", "#E8F0FE", MED_BLUE),
+        ("OOS Excess Return", "+1.85%", "#E8F5E9", "#1E8E3E"),
+        ("Full-Period IR", "1.28", "#E8F0FE", MED_BLUE),
         ("All Constraints", "100% PASS", "#E8F5E9", "#1E8E3E"),
     ]
     box_w, box_h = 0.25, 0.10
@@ -248,8 +248,8 @@ with PdfPages(REPORT) as pdf:
 
     # Meta info
     meta = [
-        ("Benchmark",    "Market-Cap-Weighted S&P 500 (~700 stocks)"),
-        ("Universe",     "700 S&P 500 constituents, monthly rebalancing"),
+        ("Benchmark",    "Market-Cap-Weighted S&P 500 (Top 500 by mktcap)"),
+        ("Universe",     "500 S&P 500 stocks/month, monthly rebalancing"),
         ("In-Sample",    "2016 – 2020  (60 months)"),
         ("Out-of-Sample","2021 – 2024  (48 months)"),
         ("Optimizer",    "cvxpy  |  Covariance: Ledoit-Wolf (36-month rolling)"),
@@ -552,7 +552,7 @@ with PdfPages(REPORT) as pdf:
 
     compliance_data = [
         ["1", "Weight Bounds",
-         "66,320 stock-months", "0", "100.00%", "PASS",
+         "54,000 stock-months", "0", "100.00%", "PASS",
          "Max single viol: 1.8e-5"],
         ["2a", "Factor Exp. — MktRF",
          "108 months", "0", "100.00%", "PASS",
