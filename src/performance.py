@@ -60,9 +60,9 @@ def compute_information_ratio(
     active_returns: pd.Series,
     freq: int = ANNUALIZE_MONTHLY,
 ) -> float:
-    """Compute Information Ratio.
+    """Compute Information Ratio (geometric annualisation).
 
-    IR = mean(active_return) / std(active_return) * sqrt(freq)
+    IR = ann_excess_return / tracking_error
 
     Parameters
     ----------
@@ -79,7 +79,9 @@ def compute_information_ratio(
     ar = active_returns.dropna().to_numpy(dtype=np.float64, na_value=np.nan)
     if len(ar) < 2:
         return np.nan
-    return float((ar.mean() / ar.std(ddof=1)) * np.sqrt(freq))
+    ann_excess = (1 + ar.mean()) ** freq - 1
+    te = ar.std(ddof=1) * np.sqrt(freq)
+    return float(ann_excess / te) if te > 0 else np.nan
 
 
 def compute_metrics(
@@ -108,13 +110,13 @@ def compute_metrics(
     r = returns.dropna()
     arr = r.to_numpy(dtype=np.float64, na_value=np.nan)
 
-    # Annualised return and volatility
-    ann_return = float(arr.mean() * freq)
+    # Annualised return (geometric / compounded) and volatility
+    ann_return = float((1 + arr.mean()) ** freq - 1)
     ann_vol = float(arr.std(ddof=1) * np.sqrt(freq))
 
     # Sharpe ratios
     sharpe_nw = compute_sharpe_nw(r, freq=freq)
-    sharpe_simple = float((arr.mean() / arr.std(ddof=1)) * np.sqrt(freq)) if arr.std(ddof=1) > 0 else np.nan
+    sharpe_simple = float(ann_return / ann_vol) if ann_vol > 0 else np.nan
 
     # Max drawdown from cumulative returns (compounded)
     cum = (1 + r).cumprod()
@@ -154,7 +156,7 @@ def compute_metrics(
         active = aligned_qs - aligned_bm
         active_arr = active.dropna().to_numpy(dtype=np.float64, na_value=np.nan)
 
-        excess_return = float(active_arr.mean() * freq)
+        excess_return = float((1 + active_arr.mean()) ** freq - 1)
         tracking_error = float(active_arr.std(ddof=1) * np.sqrt(freq))
         information_ratio = compute_information_ratio(active, freq=freq)
         max_relative_dd = float(active_arr.min())  # worst single-month underperformance
