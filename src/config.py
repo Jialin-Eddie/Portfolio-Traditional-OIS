@@ -9,7 +9,13 @@ OUTPUTS = ROOT / "outputs"
 
 # Data: https://drive.google.com/file/d/1kczsMeHAfiBnMxei667iLGbsRnDGLCwo/view?usp=sharing
 # Download final_panel.parquet and place at ../01HW_QT/Data/Output/final_panel.parquet
+# In worktree mode, ROOT.parent may not contain 01HW_QT — fall back to the known absolute path
 HW1_ROOT = ROOT.parent / "01HW_QT"
+if not HW1_ROOT.exists():
+    HW1_ROOT = Path(os.environ.get(
+        "HW1_ROOT",
+        "C:/Users/zhaoj/Desktop_backup/InternProject/QT/01HW_QT"
+    ))
 FINAL_PANEL = HW1_ROOT / "Data" / "Output" / "final_panel.parquet"
 
 SPLIT_DATE = "2020-12-31"
